@@ -559,14 +559,20 @@ public class MainActivity extends Activity {
                 fileCallback = callback;
                 Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
+                // accept 写的是 MIME（"text/plain"）还是扩展名（".md,.txt"）？
+                // 扩展名列表不是合法 MIME，setType 后系统选择器要么打不开、要么
+                // 什么都选不了（插件页的 accept=".md,.markdown,.txt,.json,.zip"
+                // 就踩的这条）。扩展名一律放 */* —— 让用户选任何文件，类型检查由
+                // 网页自己的 JS 做（file.name 后缀、file.text() 解析都在页面里）。
+                String type = "*/*";
                 if (params != null) {
                     String[] mime = params.getAcceptTypes();
-                    if (mime != null && mime.length > 0) {
-                        intent.setType(mime[0]);
+                    if (mime != null && mime.length > 0 && mime[0] != null
+                            && mime[0].contains("/") && !mime[0].startsWith(".")) {
+                        type = mime[0];
                     }
-                } else {
-                    intent.setType("*/*");
                 }
+                intent.setType(type);
                 try {
                     startActivityForResult(intent, REQ_FILE);
                 } catch (Exception e) {

@@ -251,6 +251,22 @@ public class NativeHome extends Activity {
     }
 
     @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == FileManager.REQ_IMPORT_FILE) {
+            if (resultCode == RESULT_OK && data != null) {
+                FileManager.onFilePicked(this, ui, data.getData());
+            }
+            return;
+        }
+        if (requestCode == PluginTools.REQ_PLUGIN_DIR) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                PluginTools.onFolderPicked(this, data.getData(), this::styleDialog);
+            }
+        }
+    }
+
+    @Override
     public void onBackPressed() {
         if (tab != TAB_OVERVIEW) {
             selectTab(TAB_OVERVIEW, true);
@@ -693,7 +709,7 @@ public class NativeHome extends Activity {
         final String[][] titles = {
                 {"打开控制后台"},
                 {"重启网关", "停止网关", "查看日志", "复制网关地址", "忽略电池优化"},
-                {"导入本地插件", "粘贴 Marvis 登录回调"},
+                {"导入本地插件", "粘贴 Marvis 登录回调", "文件管理器"},
                 {"检查 magpie 更新", "检查 App 更新"},
                 {"复制网页登录链接", "用浏览器打开", "设置", "重新加载网页", "关于"},
         };
@@ -703,7 +719,8 @@ public class NativeHome extends Activity {
                         "网关最后写下的三百行输出", "把 …:3425/v1 复制到剪贴板",
                         "让系统不要在熄屏后冻结网关"},
                 {"从手机存储选文件夹，拷进沙箱并交给 magpie",
-                        "浏览器里登录完，把地址栏整条 URL 贴进来"},
+                        "浏览器里登录完，把地址栏整条 URL 贴进来",
+                        "浏览、导入、删除、复制 magpie HOME 目录里的文件"},
                 {"拉 GitHub 上的新版二进制，不用重装 APK", "下载新版 APK 并调系统安装器"},
                 {"带 k= 的完整网页地址，粘到浏览器里直接登进去（绕过登录页）",
                         "交给系统浏览器，方便用电脑上的工具看",
@@ -713,7 +730,7 @@ public class NativeHome extends Activity {
         final String[][] icons = {
                 {"\u2699"},
                 {"\u27f3", "\u25a0", "\u25a4", "\u29c9", "\u26a1"},
-                {"\u2913", "\u270e"},
+                {"\u2913", "\u270e", "\u25a4"},
                 {"\u21e9", "\u2b07"},
                 {"\u29c9", "\u2197", "\u2699", "\u21bb", "\u24d8"},
         };
@@ -858,8 +875,10 @@ public class NativeHome extends Activity {
             case 2: // 插件
                 if (index == 0) {
                     PluginTools.pickFolder(this);
-                } else {
+                } else if (index == 1) {
                     PluginTools.promptMarvisCallback(this, ui, this::styleDialog);
+                } else {
+                    FileManager.open(this, ui, FileManager.root(this));
                 }
                 break;
             case 3: // 更新
