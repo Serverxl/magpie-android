@@ -1003,8 +1003,10 @@ public class GatewayService extends Service {
         lastNotifAlive = true;
         NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) {
+            // 地址固定写回环：bindHost() 在局域网模式下是 0.0.0.0，那是监听地址，
+            // 不是能填进客户端的地址（用户看到 0.0.0.0:3425 会以为坏了）。
             nm.notify(NOTIF_ID, notification(ctx, "Magpie 已就绪",
-                    "网关 http://" + bindHost(ctx) + ":" + gatewayPort(ctx), FOREGROUND_FLAGS));
+                    "网关 http://" + Prefs.browserHost(ctx) + ":" + gatewayPort(ctx), FOREGROUND_FLAGS));
         }
     }
 
@@ -1036,8 +1038,8 @@ public class GatewayService extends Service {
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm != null) {
                 nm.notify(NOTIF_ID, notification(ctx, "Magpie 运行中",
-                        "网关 http://" + bindHost(ctx) + ":" + gatewayPort(ctx)
-                                + " · 局域网接口见顶栏", FOREGROUND_FLAGS));
+                        "网关 http://" + Prefs.browserHost(ctx) + ":" + gatewayPort(ctx)
+                                + (Prefs.lan(ctx) ? " · 局域网共享已开" : ""), FOREGROUND_FLAGS));
             }
         } else {
             lastNotifAlive = false;

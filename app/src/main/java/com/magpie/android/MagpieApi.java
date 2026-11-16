@@ -160,6 +160,17 @@ final class MagpieApi {
         return get(ctx, "/api/providers", CONNECT_MS, READ_SLOW_MS);
     }
 
+    /**
+     * 全量供应商列表 + 强制拉一次新模型。
+     *
+     * <p>{@code ?wait} 会让 magpie 同步执行 {@code provider.FetchNew}（最多等
+     * 8 秒），所以返回的模型表是**刚向各家供应商要过的**，而不是上次缓存。
+     * 这是「手动刷新模型」按钮背后的那个接口。
+     */
+    static Result providersWait(Context ctx) {
+        return get(ctx, "/api/providers?wait", CONNECT_MS, WRITE_MS);
+    }
+
     /** 一条请求的原文：{@code {headers, requestBody, responseBody, …}}。 */
     static Result gatewayCall(Context ctx, long routeId) {
         return get(ctx, "/api/gateway/call?route=" + routeId, CONNECT_MS, READ_SLOW_MS);

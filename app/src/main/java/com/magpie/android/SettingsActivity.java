@@ -91,7 +91,16 @@ public class SettingsActivity extends Activity {
         port.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
 
         lan.setChecked(Prefs.lan(this));
-        lan.setOnCheckedChangeListener((button, checked) -> Prefs.setLan(SettingsActivity.this, checked));
+        lan.setOnCheckedChangeListener((button, checked) -> {
+            // 两边一起写：壳这一侧决定下次启动的绑定地址，magpie 那一侧
+            // 决定它到底要不要对外服务（并生成默认网关密钥）。
+            LanSync.set(SettingsActivity.this, checked);
+            Toast.makeText(SettingsActivity.this,
+                    checked ? "已开启局域网共享（两侧同步）" : "已关闭局域网共享",
+                    Toast.LENGTH_SHORT).show();
+        });
+        // 打开设置时对一下：magpie 网页里改过共享的话，以那边为准回写壳
+        syncLanFromMagpie();
 
 
         monet = findViewById(R.id.monet);
@@ -290,6 +299,29 @@ public class SettingsActivity extends Activity {
                 }
             }
         });
+    }
+
+    /**
+     * 打开设置时对一次：magpie 网页里改过局域网共享的话，以那边为准回写壳。
+     *
+     * <p>只在读到明确值时改，读不到（网关没起来）不动 —— 否则会把用户刚改的
+     * 值当成「对方是关的」又写回去。
+     */
+    private void syncLanFromMagpie() {
+        new Thread(() -> {
+            Boolean now = LanSync.current(this);
+            if (now == null || now == lan.isChecked()) {
+                return;
+            }
+            runOnUiThread(() -> {
+                Prefs.setLan(this, now);
+                lan.setChecked(now);
+                Toast.makeText(this,
+                        now ? "已按 magpie 的设置开启局域网共享"
+                                : "magpie 里的局域网共享是关的，已同步",
+                        Toast.LENGTH_SHORT).show();
+            });
+        }, "magpie-lan-read").start();
     }
 
     private void openUrl(String url) {

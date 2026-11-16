@@ -1,5 +1,6 @@
 package com.magpie.android;
 
+import android.content.ClipData;
 import android.graphics.drawable.GradientDrawable;
 import android.util.Log;
 import android.view.Gravity;
@@ -7,6 +8,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.json.JSONArray;
@@ -230,18 +232,267 @@ final class NativePageAccounts extends NativePage {
         });
         row.addView(none, nlp);
 
-        // 添加供应商：就在账号页，不从 ⋮ 菜单绕
-        TextView add = ui.pill("+ 添加供应商", M3.PRIMARY_CONTAINER, M3.ON_PRIMARY_CONTAINER);
-        add.setPadding(ui.dp(14), ui.dp(7), ui.dp(14), ui.dp(7));
-        LinearLayout.LayoutParams alp = ui.wrap();
-        alp.leftMargin = ui.dp(8);
-        add.setOnClickListener(v -> AddProviderSheet.open(host, ui, () -> {
-            // 加完就把缓存清掉重读，新供应商立刻出现在列表里
-            QuotaCache.reset();
-            refresh(true);
-        }));
-        row.addView(add, alp);
+        // 手动拉取刷新模型 + 查看全部模型（替代原来的「添加供应商」）
+        TextView refreshModels = ui.pill("刷新模型", M3.SECONDARY_CONTAINER, M3.ON_SECONDARY_CONTAINER);
+        refreshModels.setPadding(ui.dp(14), ui.dp(7), ui.dp(14), ui.dp(7));
+        LinearLayout.LayoutParams rlp = ui.wrap();
+        rlp.leftMargin = ui.dp(8);
+        refreshModels.setOnClickListener(v -> refreshModels());
+        row.addView(refreshModels, rlp);
+
+        TextView allModels = ui.pill("全部模型", M3.SECONDARY_CONTAINER, M3.ON_SECONDARY_CONTAINER);
+        allModels.setPadding(ui.dp(14), ui.dp(7), ui.dp(14), ui.dp(7));
+        LinearLayout.LayoutParams mlp = ui.wrap();
+        mlp.leftMargin = ui.dp(8);
+        allModels.setOnClickListener(v -> showAllModels());
+        row.addView(allModels, mlp);
         return row;
+    }
+
+    /**
+     * 手动拉取一次各家供应商的模型表。
+     *
+     * <p>走 {@code /api/providers?wait}：magpie 会真去问供应商（最多 8 秒），
+     * 而不是只给上次缓存。完事后重读本页。
+     */
+    private void refreshModels() {
+        host.bg(() -> {
+            MagpieApi.Result r = MagpieApi.providersWait(host);
+            host.post(() -> {
+                if (!r.ok()) {
+                    toast("刷新模型失败：" + r.why());
+                    return;
+                }
+                toast("模型表已刷新，正在重读…");
+                QuotaCache.reset();
+                refresh(true);
+            });
+        });
+    }
+
+    /**
+     * 弹出「全部模型」：按供应商分组，列出当前每个模型的显示名、
+     * provider id、模型 id，以及该供应商的全收写法 {@code id/*}。
+     */
+    private void showAllModels() {
+        host.bg(() -> {
+            MagpieApi.Result r = MagpieApi.providersFull(host);
+            final MagpieApi.Result res = r;
+            host.post(() -> {
+                if (!res.ok()) {
+                    toast("读不到模型列表：" + res.why());
+                    return;
+                }
+                JSONObject o = res.json();
+                if (o == null) {
+                    toast("模型列表解析失败");
+                    return;
+                }
+                buildAllModelsSheet(o);
+            });
+        });
+    }
+
+    /** 全部模型弹窗（数据已在 res 里，直接建 UI）。 */
+    private void buildAllModelsSheet(JSONObject o) {
+        android.app.Dialog dialog = new android.app.Dialog(host, R.style.Theme_Magpie_Sheet);
+        LinearLayout root = ui.column();
+        GradientDrawable bg = ui.round(ui.col(M3.SURFACE_CONTAINER_LOW), 28);
+        bg.setCornerRadii(new float[]{
+                ui.dp(28), ui.dp(28), ui.dp(28), ui.dp(28), 0, 0, 0, 0});
+        root.setBackground(bg);
+        root.setPadding(ui.dp(16), ui.dp(14), ui.dp(16),
+                ui.dp(16) + MainActivity.barHeightOf(host, "navigation_bar_height"));
+
+        TextView title = ui.text("全部模型", 21, M3.ON_SURFACE, true);
+        title.setPadding(ui.dp(4), 0, 0, ui.dp(4));
+        root.addView(title);
+
+        TextView sub = ui.text("显示名 / provider id / 模型 id · 全收写法",
+                12, M3.ON_SURFACE_VARIANT, false);
+        sub.setPadding(ui.dp(4), 0, 0, ui.dp(10));
+        root.addView(sub);
+
+        ScrollView scroll = new ScrollView(host);
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout list = ui.column();
+        scroll.addView(list, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        JSONArray providers = NativeData.arr(o, "providers");
+        for (int i = 0; i < providers.length(); i++) {
+            JSONObject p = NativeData.at(providers, i);
+            if (p == null) {
+                continue;
+            }
+            String pid = NativeData.str(p, "id", "");
+            String pname = NativeData.str(p, "name", pid);
+            JSONArray models = NativeData.arr(p, "models");
+            list.addView(providerBlock(pid, pname, models));
+        }
+
+        root.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        dialog.setContentView(root);
+        android.view.Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawableResource(android.R.color.transparent);
+            w.setGravity(Gravity.BOTTOM);
+            int screenH = host.getResources().getDisplayMetrics().heightPixels;
+            w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, (int) (screenH * 0.9f));
+        }
+        dialog.show();
+    }
+
+    /** 一家供应商的模型块：标题行（显示名 + provider id + 全收写法）+ 模型行。 */
+    private View providerBlock(String pid, String pname, JSONArray models) {
+        LinearLayout card = ui.column();
+        card.setBackground(ui.roundStroke(ui.col(M3.SURFACE_CONTAINER), 16,
+                ui.col(M3.OUTLINE_VARIANT), 1));
+        int pad = ui.dp(12);
+        card.setPadding(pad, pad, pad, pad);
+        LinearLayout.LayoutParams lp = ui.matchWrap(8);
+        lp.leftMargin = ui.dp(2);
+        lp.rightMargin = ui.dp(2);
+        card.setLayoutParams(lp);
+
+        LinearLayout head = ui.row();
+        TextView t = ui.text(pname, 14.5f, M3.ON_SURFACE, true);
+        t.setSingleLine(true);
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        head.addView(t, ui.weight(1));
+
+        TextView wild = ui.mono(pid + "/*", 10.5f, M3.PRIMARY);
+        wild.setOnClickListener(v -> {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                    host.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("magpie", pid + "/*"));
+            }
+            toast("已复制 " + pid + "/*");
+        });
+        head.addView(wild);
+        card.addView(head);
+
+        TextView pidLine = ui.mono("provider id: " + pid, 10.5f, M3.ON_SURFACE_VARIANT);
+        pidLine.setLayoutParams(ui.matchWrap(3));
+        card.addView(pidLine);
+
+        if (models.length() == 0) {
+            TextView none = ui.text("（没有模型）", 11.5f, M3.ON_SURFACE_VARIANT, false);
+            none.setLayoutParams(ui.matchWrap(6));
+            card.addView(none);
+            return card;
+        }
+
+        for (int i = 0; i < models.length(); i++) {
+            JSONObject m = NativeData.at(models, i);
+            if (m == null) {
+                continue;
+            }
+            String mid = NativeData.str(m, "id", "?");
+            String mname = NativeData.str(m, "name", "");
+            if (mname.isEmpty()) {
+                mname = mid;
+            }
+            card.addView(modelRow(pid, mname, mid, m));
+        }
+        return card;
+    }
+
+    /**
+     * 一个模型行：上行 显示名 + 倍率 + 能力胶囊，下行 模型 id。
+     * 长按复制完整引用 {@code pid/mid}。
+     */
+    private View modelRow(final String pid, String mname, final String mid, JSONObject m) {
+        LinearLayout row = ui.column();
+        row.setPadding(ui.dp(4), ui.dp(5), ui.dp(4), ui.dp(5));
+        row.setBackground(ui.round(ui.col(M3.SURFACE_CONTAINER_HIGH), 10));
+        LinearLayout.LayoutParams lp = ui.matchWrap(3);
+        row.setLayoutParams(lp);
+
+        LinearLayout top = ui.row();
+
+        TextView mn = ui.text(mname, 12.5f, M3.ON_SURFACE, true);
+        mn.setSingleLine(true);
+        mn.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        top.addView(mn, ui.weight(1));
+
+        // 倍率：rate 是「一个请求消耗套餐多少倍」；0 = 没给
+        double rate = NativeData.dec(m, "rate");
+        if (rate > 0) {
+            TextView r = ui.mono(rateText(rate) + "×", 10.5f, M3.PRIMARY);
+            LinearLayout.LayoutParams rlp = ui.wrap();
+            rlp.leftMargin = ui.dp(6);
+            top.addView(r, rlp);
+        }
+
+        // 能力胶囊：免费 / 视觉 / 推理 / 生图 / 生视频
+        if (NativeData.flag(m, "free")) {
+            top.addView(capPill("免费", M3.TERTIARY_CONTAINER, M3.ON_TERTIARY_CONTAINER));
+        }
+        if (NativeData.flag(m, "images")) {
+            top.addView(capPill("视觉", M3.SECONDARY_CONTAINER, M3.ON_SECONDARY_CONTAINER));
+        }
+        JSONArray efforts = NativeData.arr(m, "efforts");
+        if (efforts.length() > 0) {
+            top.addView(capPill("推理", M3.PRIMARY_CONTAINER, M3.ON_PRIMARY_CONTAINER));
+        }
+        String kind = NativeData.str(m, "kind", "");
+        if ("image".equalsIgnoreCase(kind)) {
+            top.addView(capPill("生图", M3.ERROR_CONTAINER, M3.ON_ERROR_CONTAINER));
+        } else if ("video".equalsIgnoreCase(kind)) {
+            top.addView(capPill("生视频", M3.ERROR_CONTAINER, M3.ON_ERROR_CONTAINER));
+        }
+
+        row.addView(top);
+
+        TextView mi = ui.mono(mid, 10.5f, M3.ON_SURFACE_VARIANT);
+        mi.setSingleLine(true);
+        mi.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        mi.setLayoutParams(ui.matchWrap(2));
+        row.addView(mi);
+
+        row.setOnLongClickListener(v -> {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                    host.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("magpie", pid + "/" + mid));
+            }
+            toast("已复制 " + pid + "/" + mid);
+            return true;
+        });
+        return row;
+    }
+
+    private View capPill(String s, int bg, int fg) {
+        TextView t = ui.text(s, 9.5f, fg, true);
+        t.setBackground(ui.round(ui.col(bg), 999));
+        int px = ui.dp(6), py = ui.dp(2);
+        t.setPadding(px, py, px, py);
+        LinearLayout.LayoutParams lp = ui.wrap();
+        lp.leftMargin = ui.dp(4);
+        t.setLayoutParams(lp);
+        return t;
+    }
+
+    private String rateText(double rate) {
+        if (rate >= 100) {
+            return String.valueOf(Math.round(rate));
+        }
+        String s = String.format(java.util.Locale.US, "%.2f", rate);
+        while (s.endsWith("0")) {
+            s = s.substring(0, s.length() - 1);
+        }
+        if (s.endsWith(".")) {
+            s = s.substring(0, s.length() - 1);
+        }
+        return s;
+    }
+
+    private void toast(String s) {
+        android.widget.Toast.makeText(host, s, android.widget.Toast.LENGTH_SHORT).show();
     }
 
     private String accountKey(JSONObject q) {
@@ -821,10 +1072,6 @@ final class NativePageAccounts extends NativePage {
             break;
         }
         return new String[]{"", ""};
-    }
-
-    private void toast(String s) {
-        android.widget.Toast.makeText(host, s, android.widget.Toast.LENGTH_SHORT).show();
     }
 
     /** 一个额度窗口：名字 + 剩余条 + 重置倒计时。 */

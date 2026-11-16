@@ -610,6 +610,8 @@ public class NativeHome extends Activity {
                         polling = false;
                         gatewayReady = true;
                         refreshHeader();
+                        // 网关就绪后把壳里的局域网开关推给 magpie（幂等）
+                        LanSync.pushIfNeeded(this);
                         currentPage().refresh(true);
                     });
                     return;
@@ -693,7 +695,7 @@ public class NativeHome extends Activity {
                 {"重启网关", "停止网关", "查看日志", "复制网关地址", "忽略电池优化"},
                 {"导入本地插件", "粘贴 Marvis 登录回调"},
                 {"检查 magpie 更新", "检查 App 更新"},
-                {"用浏览器打开", "设置", "重新加载网页", "关于"},
+                {"复制网页登录链接", "用浏览器打开", "设置", "重新加载网页", "关于"},
         };
         final String[][] subs = {
                 {"magpie 自己的完整网页界面：插件、脱敏、同步备份都在这里"},
@@ -703,7 +705,8 @@ public class NativeHome extends Activity {
                 {"从手机存储选文件夹，拷进沙箱并交给 magpie",
                         "浏览器里登录完，把地址栏整条 URL 贴进来"},
                 {"拉 GitHub 上的新版二进制，不用重装 APK", "下载新版 APK 并调系统安装器"},
-                {"交给系统浏览器，方便用电脑上的工具看",
+                {"带 k= 的完整网页地址，粘到浏览器里直接登进去（绕过登录页）",
+                        "交给系统浏览器，方便用电脑上的工具看",
                         "端口、局域网访问、外观与开机启动", "页面重新读一遍，不重启网关",
                         "官方仓库、移植作者与许可证"},
         };
@@ -712,7 +715,7 @@ public class NativeHome extends Activity {
                 {"\u27f3", "\u25a0", "\u25a4", "\u29c9", "\u26a1"},
                 {"\u2913", "\u270e"},
                 {"\u21e9", "\u2b07"},
-                {"\u2197", "\u2699", "\u21bb", "\u24d8"},
+                {"\u29c9", "\u2197", "\u2699", "\u21bb", "\u24d8"},
         };
 
         final Dialog dialog = new Dialog(this, R.style.Theme_Magpie_Sheet);
@@ -869,12 +872,15 @@ public class NativeHome extends Activity {
             default: // 其他
                 switch (index) {
                     case 0:
-                        openInBrowser();
+                        copyWebLoginLink();
                         break;
                     case 1:
-                        openSettings();
+                        openInBrowser();
                         break;
                     case 2:
+                        openSettings();
+                        break;
+                    case 3:
                         reloadWebPage();
                         break;
                     default:
@@ -883,6 +889,28 @@ public class NativeHome extends Activity {
                 }
                 break;
         }
+    }
+
+    /**
+     * 复制带 key 的网页登录链接。
+     *
+     * <p>为什么要有这条：magpie 网页对没带 key 的请求会回一张「magpie web」
+     * 登录页，要你粘 MAGPIE_WEB_KEY。用户手上通常没有那串东西，就卡在登录页。
+     * 而壳自己就知道 key（{@link GatewayService#webUrl} 拼的就是它）。
+     *
+     * <p><b>只复制本机回环这一条</b>：用户是在自己手机上复制、粘到本机浏览器，
+     * 127.0.0.1 就够。绝不能把局域网地址用换行拼进去 —— 粘进地址栏后换行会
+     * 污染 ?k= 参数，magpie 就报「this link's key is not this magpie web's」。
+     */
+    private void copyWebLoginLink() {
+        String link = GatewayService.webUrl(this);
+        ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (cm != null) {
+            cm.setPrimaryClip(ClipData.newPlainText("magpie", link));
+        }
+        toast(Prefs.lan(this)
+                ? "已复制本机登录链接，粘到浏览器即可"
+                : "已复制登录链接，粘到浏览器即可（带 key，不用再输）");
     }
 
     /** 用系统浏览器打开 magpie 网页（带 key，直接登进去）。 */
